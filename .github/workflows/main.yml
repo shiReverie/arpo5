@@ -75,6 +75,9 @@ jobs:
           artifactsPath: artifacts
           githubToken: ${{ secrets.GITHUB_TOKEN }}
           checkName: Unity Test Results
+          coverageOptions: ''                        
+          customImage: unityci/editor:${{ env.UNITY_VERSION }}-linux-il2cpp-4
+          customParameters: -logFile -               
 
       - name: Upload test artifacts
         if: always()
