@@ -38,9 +38,9 @@ jobs:
           docker manifest inspect unityci/editor:${UNITY_VERSION}-linux-il2cpp-3 > /dev/null \
             || { echo "НЕТ ОБРАЗА: unityci/editor:${UNITY_VERSION}-linux-il2cpp-3"; exit 1; }
 
-          echo "=== Проверка universal образа (WebGL) ==="
-          docker manifest inspect unityci/editor:${UNITY_VERSION}-universal-3 > /dev/null \
-            || { echo "НЕТ ОБРАЗА: unityci/editor:${UNITY_VERSION}-universal-3"; exit 1; }
+          echo "=== Проверка webgl образа (WebGL) ==="
+          docker manifest inspect unityci/editor:${UNITY_VERSION}-webgl-4 > /dev/null \
+            || { echo "НЕТ ОБРАЗА: unityci/editor:${UNITY_VERSION}-webgl-4"; exit 1; }
 
           echo "Все нужные образы найдены."
 
@@ -114,7 +114,7 @@ jobs:
           buildMethod: BuildManager.BuildWebGL
           unityVersion: ${{ env.UNITY_VERSION }}
           versioning: None
-          customImage: unityci/editor:${{ env.UNITY_VERSION }}-universal-3
+          customImage: unityci/editor:${{ env.UNITY_VERSION }}-webgl-4
 
       - name: Upload WebGL Artifact
         uses: actions/upload-artifact@v4
