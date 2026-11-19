@@ -4,12 +4,19 @@ on:
   push:
     branches: [ "master" ]
 
+# Глобально ограничиваем время, чтобы «зависание» не висело 6 часов
+env:
+  UNITY_VERSION: 6000.6.3f1
+
 jobs:
   sanity_check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Check Unity Directories
         run: |
@@ -17,49 +24,56 @@ jobs:
           test -d ProjectSettings || { echo "ProjectSettings не найден"; exit 1; }
           test -d Packages || { echo "Packages не найден"; exit 1; }
           echo "ProjectSettings и Packages найдены."
+          echo "Unity version in project: $(grep -E 'm_EditorVersion' ProjectSettings/ProjectVersion.txt || true)"
 
       - name: Locate 2D Platformer Scripts
         run: |
           echo "=== Поиск C# скриптов в папке Assets ==="
-          find Assets/ -name "*Controller.cs" -print
-          find Assets/ -name "BuildManager.cs" -print
-          find Assets/ -name "*.asmdef" -print
+          find Assets/ -name "*Controller.cs" -print 2>/dev/null || true
+          find Assets/ -name "BuildManager.cs" -print 2>/dev/null || true
+          find Assets/ -name "*.asmdef" -print 2>/dev/null || true
+
+      - name: Verify Unity Docker Image Exists
+        run: |
+          echo "=== Проверка docker-образа для тестов ==="
+          docker manifest inspect unityci/editor:${UNITY_VERSION}-linux-il2cpp-3 > /dev/null \
+            || { echo "НЕТ ОБРАЗА: unityci/editor:${UNITY_VERSION}-linux-il2cpp-3"; exit 1; }
+          echo "=== Проверка docker-образа для WebGL ==="
+          docker manifest inspect unityci/editor:${UNITY_VERSION}-linux-webgl-3 > /dev/null \
+            || { echo "НЕТ ОБРАЗА: unityci/editor:${UNITY_VERSION}-linux-webgl-3"; exit 1; }
+          echo "Образы найдены."
 
   run_tests:
     needs: sanity_check
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           lfs: true
 
-      - uses: actions/cache@v4
+      - name: Cache Library
+        uses: actions/cache@v4
         with:
           path: Library
-          key: Library-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
-
-      - name: Install GameCI CLI
-        run: |
-          curl -sL -o game-ci.tar.gz https://github.com/game-ci/cli/releases/download/v0.1.72/game-ci-linux-x64.tar.gz
-          tar xzf game-ci.tar.gz ./game-ci
-          echo "$PWD" >> $GITHUB_PATH
+          key: Library-${{ runner.os }}-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/packages-lock.json', 'Packages/manifest.json', 'ProjectSettings/ProjectVersion.txt', 'Assets/**/*.asmdef') }}
+          restore-keys: |
+            Library-${{ runner.os }}-${{ env.UNITY_VERSION }}-
+            Library-${{ runner.os }}-
 
       - name: Run Unity Tests
-        run: |
-          game-ci test --docker --dockerShmSize=1025m \
-            --engine=unity \
-            --testPlatforms='playmode;editmode;COMBINE_RESULTS' \
-            --engineVersion=6000.6.3f1 \
-            --coverageEnabled=false \
-            --artifactsPath=artifacts \
-            --dockerIsolationMode=default \
-            --containerRegistryRepository=unityci/editor \
-            --containerRegistryImageVersion=3
+        uses: game-ci/unity-test-runner@v4
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: ${{ env.UNITY_VERSION }}
+          testMode: all
+          artifactsPath: artifacts
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          checkName: Unity Test Results
 
       - name: Upload test artifacts
         if: always()
@@ -71,6 +85,7 @@ jobs:
   build_game:
     needs: run_tests
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     outputs:
       build_status: ${{ job.status }}
     steps:
@@ -79,10 +94,13 @@ jobs:
         with:
           lfs: true
 
-      - uses: actions/cache@v4
+      - name: Cache Library
+        uses: actions/cache@v4
         with:
           path: Library
-          key: Library-Build-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
+          key: Library-Build-${{ runner.os }}-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/packages-lock.json', 'Packages/manifest.json', 'ProjectSettings/ProjectVersion.txt', 'Assets/**/*.asmdef') }}
+          restore-keys: |
+            Library-Build-${{ runner.os }}-${{ env.UNITY_VERSION }}-
 
       - name: Build WebGL Player
         uses: game-ci/unity-builder@v4
@@ -93,7 +111,8 @@ jobs:
         with:
           targetPlatform: WebGL
           buildMethod: BuildManager.BuildWebGL
-          unityVersion: 6000.6.3f1
+          unityVersion: ${{ env.UNITY_VERSION }}
+          versioning: None
 
       - name: Upload WebGL Artifact
         uses: actions/upload-artifact@v4
@@ -105,6 +124,7 @@ jobs:
     needs: run_tests
     if: github.repository == 'shiReverie/arpo2'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout full history
         uses: actions/checkout@v4
@@ -134,6 +154,7 @@ jobs:
   build_docker_image:
     needs: build_game
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
@@ -155,7 +176,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push Compressed Docker Image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
@@ -167,6 +188,7 @@ jobs:
   deploy_to_pages:
     needs: build_game
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
