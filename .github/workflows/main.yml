@@ -33,15 +33,17 @@ jobs:
           find Assets/ -name "BuildManager.cs" -print 2>/dev/null || true
           find Assets/ -name "*.asmdef" -print 2>/dev/null || true
 
-      - name: Verify Unity Docker Image Exists
-        run: |
-          echo "=== Проверка docker-образа для тестов ==="
+            - name: Verify Unity Docker Image Exists
+          run: |
+          echo "=== Проверка linux-il2cpp образа (тесты) ==="
           docker manifest inspect unityci/editor:${UNITY_VERSION}-linux-il2cpp-3 > /dev/null \
             || { echo "НЕТ ОБРАЗА: unityci/editor:${UNITY_VERSION}-linux-il2cpp-3"; exit 1; }
-          echo "=== Проверка docker-образа для WebGL ==="
-          docker manifest inspect unityci/editor:${UNITY_VERSION}-linux-webgl-3 > /dev/null \
-            || { echo "НЕТ ОБРАЗА: unityci/editor:${UNITY_VERSION}-linux-webgl-3"; exit 1; }
-          echo "Образы найдены."
+
+          echo "=== Проверка universal образа (WebGL) ==="
+          docker manifest inspect unityci/editor:${UNITY_VERSION}-universal-3 > /dev/null \
+            || { echo "НЕТ ОБРАЗА: unityci/editor:${UNITY_VERSION}-universal-3"; exit 1; }
+
+          echo "Все нужные образы найдены."
 
   run_tests:
     needs: sanity_check
@@ -102,17 +104,18 @@ jobs:
           restore-keys: |
             Library-Build-${{ runner.os }}-${{ env.UNITY_VERSION }}-
 
-      - name: Build WebGL Player
-        uses: game-ci/unity-builder@v4
+            - name: Build WebGL Player
+          uses: game-ci/unity-builder@v4
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        with:
+          with:
           targetPlatform: WebGL
           buildMethod: BuildManager.BuildWebGL
           unityVersion: ${{ env.UNITY_VERSION }}
           versioning: None
+          customImage: unityci/editor:${{ env.UNITY_VERSION }}-universal-3
 
       - name: Upload WebGL Artifact
         uses: actions/upload-artifact@v4
