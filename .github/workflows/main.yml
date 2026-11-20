@@ -35,10 +35,9 @@ jobs:
   run_tests:
     needs: sanity_check
     runs-on: ubuntu-latest
-    # ✅ ДОБАВЛЯЕМ БЛОК PERMISSIONS ДЛЯ ДОСТУПА К CHECKS API
     permissions:
       contents: read
-      checks: write  # Разрешает создавать красивые отчеты о тестах в GitHub
+      checks: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -54,8 +53,10 @@ jobs:
       - name: Run Unity Tests (Playmode)
         uses: game-ci/unity-test-runner@v4
         env:
-          # 👇 Оставляем ТОЛЬКО лицензию для Personal версии
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
         with:
           unityVersion: ${{ env.UNITY_VERSION }}
           testMode: playmode
@@ -74,6 +75,21 @@ jobs:
             echo "Папка artifacts не создана (тесты не найдены)"
             mkdir -p artifacts
           fi
+
+      - name: Debug failure (print Unity logs)
+        if: failure()
+        run: |
+          echo "=== Содержимое artifacts ==="
+          ls -la artifacts/ || true
+          echo "=== Ищем логи Unity ==="
+          find . -name "*.log" -not -path "./Library/*" 2>/dev/null | head -20
+          echo "=== Последние строки логов ==="
+          for f in $(find artifacts -name "*.log" 2>/dev/null); do
+            echo "----- $f -----"
+            tail -100 "$f"
+          done
+          echo "=== Результаты тестов (если есть) ==="
+          cat artifacts/*results*.xml 2>/dev/null | head -50 || echo "Файлов результатов нет"
 
       - name: Upload Test Artifacts
         if: always()
@@ -116,8 +132,10 @@ jobs:
       - name: Build WebGL Player
         uses: game-ci/unity-builder@v4
         env:
-          # 👇 Оставляем ТОЛЬКО лицензию для Personal версии
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
         with:
           unityVersion: ${{ env.UNITY_VERSION }}
           targetPlatform: WebGL
@@ -251,7 +269,7 @@ jobs:
   notify_telegram:
     needs: [build_game, build_docker_image, deploy_to_pages]
     runs-on: ubuntu-latest
-    if: always() # Выполняется всегда, независимо от успеха или ошибки предыдущих шагов
+    if: always()
     steps:
       - name: Send Telegram Notification
         env:
@@ -267,7 +285,6 @@ jobs:
             TEXT="⚠️ *Ошибка в процессе сборки или деплоя Unity 2D Platformer!* Статус: \`${STATUS}\`"
           fi
           
-          # Формируем сообщение и отправляем через curl
           MESSAGE="${EMOJI} ${TEXT}
           
           📦 Репозиторий: \`${{ github.repository }}\`
