@@ -35,6 +35,10 @@ jobs:
   run_tests:
     needs: sanity_check
     runs-on: ubuntu-latest
+    # ✅ ДОБАВЛЯЕМ БЛОК PERMISSIONS ДЛЯ ДОСТУПА К CHECKS API
+    permissions:
+      contents: read
+      checks: write  # Разрешает создавать красивые отчеты о тестах в GitHub
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -56,9 +60,10 @@ jobs:
         with:
           unityVersion: ${{ env.UNITY_VERSION }}
           testMode: playmode
-          dockerShmSize: 1025m
+          # ✅ УДАЛЕНО: dockerShmSize (вызывало Warning, так как параметр устарел в v4)
           artifactsPath: artifacts
           githubToken: ${{ secrets.GITHUB_TOKEN }}
+          checkName: "Unity Playmode Tests" # Дает понятное имя проверке в интерфейсе GitHub
 
       - name: Fix Artifacts Permissions
         if: always()
