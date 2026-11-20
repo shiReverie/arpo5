@@ -54,16 +54,14 @@ jobs:
       - name: Run Unity Tests (Playmode)
         uses: game-ci/unity-test-runner@v4
         env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          # 👇 Оставляем ТОЛЬКО лицензию для Personal версии
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
           unityVersion: ${{ env.UNITY_VERSION }}
           testMode: playmode
-          # ✅ УДАЛЕНО: dockerShmSize (вызывало Warning, так как параметр устарел в v4)
           artifactsPath: artifacts
           githubToken: ${{ secrets.GITHUB_TOKEN }}
-          checkName: "Unity Playmode Tests" # Дает понятное имя проверке в интерфейсе GitHub
+          checkName: "Unity Playmode Tests"
 
       - name: Fix Artifacts Permissions
         if: always()
@@ -118,15 +116,13 @@ jobs:
       - name: Build WebGL Player
         uses: game-ci/unity-builder@v4
         env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          # 👇 Оставляем ТОЛЬКО лицензию для Personal версии
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
           unityVersion: ${{ env.UNITY_VERSION }}
           targetPlatform: WebGL
           buildMethod: BuildManager.BuildWebGL
           buildsPath: Builds/WebGL
-          dockerShmSize: 4g
           githubToken: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify Build Output
