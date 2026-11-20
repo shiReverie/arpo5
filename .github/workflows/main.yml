@@ -3,6 +3,9 @@ name: Unity 2D Platformer CI/CD
 on:
   push:
     branches: [ "master" ]
+    
+env:
+  UNITY_VERSION: 6000.6.3f1
 
 jobs:
   sanity_check:
@@ -74,23 +77,40 @@ jobs:
         with:
           lfs: true
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
+          docker image prune -af || true
+          df -h
+
       - uses: actions/cache@v4
         with:
           path: Library
-          key: Library-Build-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
+          key: Library-${{ runner.os }}-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
+          restore-keys: |
+            Library-Build-${{ runner.os }}-${{ env.UNITY_VERSION }}-v2-
+
+      - name: Install GameCI CLI
+        run: |
+          curl -sL -o game-ci.tar.gz https://github.com/game-ci/cli/releases/download/v0.1.72/game-ci-linux-x64.tar.gz
+          tar xzf game-ci.tar.gz ./game-ci
+          echo "$PWD" >> $GITHUB_PATH
 
       - name: Build WebGL Player
-        uses: game-ci/unity-builder@v4
+        run: |
+          game-ci build --docker --dockerShmSize=4g \
+            --engine=unity --engineVersion=6000.6.3f1 \
+            --targetPlatform=WebGL \
+            --buildMethod=BuildManager.BuildWebGL \
+            --buildPath=Builds/WebGL \
+            --dockerIsolationMode=default \
+            --containerRegistryRepository=unityci/editor \
+            --containerRegistryImageVersion=4
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        with:
-          targetPlatform: WebGL
-          buildMethod: BuildManager.BuildWebGL
-          unityVersion: 6000.6.3f1
-          customImage: unityci/editor:6000.6.3f1-webgl-4
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
 
       - name: Upload WebGL Artifact
         uses: actions/upload-artifact@v4
