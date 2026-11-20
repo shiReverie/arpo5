@@ -23,8 +23,8 @@ jobs:
       - name: Locate 2D Platformer Scripts
         run: |
           echo "=== Поиск C# скриптов в папке Assets ==="
-          find Assets/ -name "*Controller.cs" -print
-          find Assets/ -name "BuildManager.cs" -print
+          find Assets/ -name "*Controller.cs" -print || true
+          find Assets/ -name "BuildManager.cs" -print || true
 
   run_tests:
     needs: sanity_check
@@ -40,24 +40,21 @@ jobs:
           path: Library
           key: Library-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
 
-      - name: Install GameCI CLI
-        run: |
-          curl -sL -o game-ci.tar.gz https://github.com/game-ci/cli/releases/download/v0.1.72/game-ci-linux-x64.tar.gz
-          tar xzf game-ci.tar.gz ./game-ci
-          echo "$PWD" >> $GITHUB_PATH
-
-      - name: Run Unity Tests
-        run: |
-          game-ci test --docker --dockerShmSize=1025m \
-            --engine=unity --testPlatforms='playmode;editmode;COMBINE_RESULTS' \
-            --engineVersion=6000.6.3f1 --coverageEnabled=false \
-            --artifactsPath=artifacts --dockerIsolationMode=default \
-            --containerRegistryRepository=unityci/editor \
-            --containerRegistryImageVersion=3
+      # ✅ ЗАМЕНА: Используем официальный экшен вместо ручного вызова CLI
+      - name: Run Unity Tests (Playmode)
+        uses: game-ci/unity-test-runner@v4
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          unityVersion: ${{ env.UNITY_VERSION }}
+          testMode: playmode
+          # ⚠️ ВАЖНО: Для Unity 6000.6.x+ размер shared memory должен быть >= 1025m, иначе тесты падают [[22]]
+          dockerShmSize: 1025m 
+          customParameters: -testSettingsFile Packages/com.unity.test-framework/Settings/DefaultTestSettings.asset
+
+      # Если нужны также editmode тесты, просто продублируйте шаг выше, изменив testMode: editmode
 
       - name: Upload test artifacts
         if: always()
@@ -90,27 +87,19 @@ jobs:
           restore-keys: |
             Library-Build-${{ runner.os }}-${{ env.UNITY_VERSION }}-v2-
 
-      - name: Install GameCI CLI
-        run: |
-          curl -sL -o game-ci.tar.gz https://github.com/game-ci/cli/releases/download/v0.1.76/game-ci-linux-x64.tar.gz
-          tar xzf game-ci.tar.gz ./game-ci
-          echo "$PWD" >> $GITHUB_PATH
-
+      # ✅ ЗАМЕНА: Используем официальный экшен для сборки
       - name: Build WebGL Player
-        run: |
-          game-ci build --docker --dockerShmSize=4g \
-            --engine=unity --engineVersion=6000.6.3f1 \
-            --targetPlatform=WebGL \
-            --buildMethod=BuildManager.BuildWebGL \
-            --buildPath=Builds/WebGL \
-            --dockerIsolationMode=default \
-            --containerRegistryRepository=unityci/editor \
-            --containerRegistryImageVersion=4
+        uses: game-ci/unity-builder@v4
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: WebGL
+          buildMethod: BuildManager.BuildWebGL
+          buildsPath: Builds/WebGL
+          dockerShmSize: 4g
 
       - name: Upload WebGL Artifact
         uses: actions/upload-artifact@v4
