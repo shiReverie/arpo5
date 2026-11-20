@@ -8,6 +8,9 @@ env:
   UNITY_VERSION: 6000.6.3f1
 
 jobs:
+  # ============================================================
+  # 1. Sanity Check - проверка структуры проекта
+  # ============================================================
   sanity_check:
     runs-on: ubuntu-latest
     steps:
@@ -26,6 +29,9 @@ jobs:
           find Assets/ -name "*Controller.cs" -print || true
           find Assets/ -name "BuildManager.cs" -print || true
 
+  # ============================================================
+  # 2. Run Tests - запуск Unity тестов
+  # ============================================================
   run_tests:
     needs: sanity_check
     runs-on: ubuntu-latest
@@ -60,7 +66,6 @@ jobs:
           echo "=== Исправление прав доступа к артефактам ==="
           if [ -d "artifacts" ]; then
             sudo chown -R $(whoami):$(id -g) artifacts/ || true
-            echo "Содержимое папки artifacts:"
             ls -la artifacts/ || echo "Папка пуста"
           else
             echo "Папка artifacts не создана (тесты не найдены)"
@@ -76,6 +81,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # ============================================================
+  # 3. Build Game - сборка WebGL
+  # ============================================================
   build_game:
     needs: run_tests
     runs-on: ubuntu-latest
@@ -134,6 +142,9 @@ jobs:
           path: Builds/WebGL
           retention-days: 7
 
+  # ============================================================
+  # 4. Mirror Repo - зеркалирование в backup-репозиторий
+  # ============================================================
   mirror_repo:
     needs: run_tests
     if: github.repository == 'shiReverie/arpo2'
@@ -150,10 +161,10 @@ jobs:
           BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
         run: |
           if [ -z "$BACKUP_TOKEN" ]; then
-            echo "=== ❌ ОШИБКА: BACKUP_TOKEN is empty! Create a PAT with scopes [repo, workflow] ==="
+            echo "=== ❌ ОШИБКА: BACKUP_TOKEN is empty! ==="
             exit 1
           else
-            echo "=== ✅ BACKUP_TOKEN is set (length: ${#BACKUP_TOKEN}) ==="
+            echo "=== ✅ BACKUP_TOKEN is set ==="
           fi
 
       - name: Push to Backup Repository
@@ -164,6 +175,9 @@ jobs:
           git push --force https://x-access-token:${BACKUP_TOKEN}@github.com/shiReverie/arpo2_backup.git master
           echo "=== ✅ Код успешно продублирован ==="
 
+  # ============================================================
+  # 5. Build Docker Image - сборка Docker-образа с игрой
+  # ============================================================
   build_docker_image:
     needs: build_game
     runs-on: ubuntu-latest
@@ -205,6 +219,9 @@ jobs:
             ghcr.io/shireverie/platformer-game:latest
             ghcr.io/shireverie/platformer-game:${{ github.sha }}
 
+  # ============================================================
+  # 6. Deploy to GitHub Pages - деплой на GitHub Pages
+  # ============================================================
   deploy_to_pages:
     needs: build_game
     runs-on: ubuntu-latest
@@ -226,3 +243,37 @@ jobs:
           folder: Builds/WebGL
           branch: gh-pages
           clean: true
+
+  # ============================================================
+  # 7. Notify Telegram - отправка уведомления о результате
+  # ============================================================
+  notify_telegram:
+    needs: [build_game, build_docker_image, deploy_to_pages]
+    runs-on: ubuntu-latest
+    if: always() # Выполняется всегда, независимо от успеха или ошибки предыдущих шагов
+    steps:
+      - name: Send Telegram Notification
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STATUS: ${{ needs.build_game.result }}
+        run: |
+          if [ "$STATUS" == "success" ]; then
+            EMOJI="✅"
+            TEXT="🚀 *Сборка и деплой Unity 2D Platformer успешно завершены!*"
+          else
+            EMOJI="❌"
+            TEXT="⚠️ *Ошибка в процессе сборки или деплоя Unity 2D Platformer!* Статус: \`${STATUS}\`"
+          fi
+          
+          # Формируем сообщение и отправляем через curl
+          MESSAGE="${EMOJI} ${TEXT}
+          
+          📦 Репозиторий: \`${{ github.repository }}\`
+          🔀 Ветка: \`${{ github.ref_name }}\`
+          🔗 [Ссылка на Actions](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d chat_id="${CHAT_ID}" \
+            -d text="${MESSAGE}" \
+            -d parse_mode="Markdown"
