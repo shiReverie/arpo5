@@ -3,11 +3,14 @@ name: Unity 2D Platformer CI/CD
 on:
   push:
     branches: [ "master" ]
-    
+
 env:
   UNITY_VERSION: 6000.6.3f1
 
 jobs:
+  # ============================================================
+  # ЗАДАЧА 1: Быстрая диагностика структуры проекта (Sanity Check)
+  # ============================================================
   sanity_check:
     runs-on: ubuntu-latest
     steps:
@@ -17,8 +20,8 @@ jobs:
       - name: Check Unity Directories
         run: |
           echo "=== Проверка наличия метаданных Unity ==="
-          if [ -d "ProjectSettings" ]; then echo "ProjectSettings найден."; else echo "Ошибка!" && exit 1; fi
-          if [ -d "Packages" ]; then echo "Packages найден."; else echo "Ошибка!" && exit 1; fi
+          if [ -d "ProjectSettings" ]; then echo "✅ ProjectSettings найден."; else echo "❌ Ошибка!" && exit 1; fi
+          if [ -d "Packages" ]; then echo "✅ Packages найден."; else echo "❌ Ошибка!" && exit 1; fi
 
       - name: Locate 2D Platformer Scripts
         run: |
@@ -26,6 +29,9 @@ jobs:
           find Assets/ -name "*Controller.cs" -print || true
           find Assets/ -name "BuildManager.cs" -print || true
 
+  # ============================================================
+  # ЗАДАЧА 2: Автоматический запуск тестов Unity
+  # ============================================================
   run_tests:
     needs: sanity_check
     runs-on: ubuntu-latest
@@ -35,12 +41,12 @@ jobs:
         with:
           lfs: true
 
-      - uses: actions/cache@v4
+      - name: Cache Library
+        uses: actions/cache@v4
         with:
           path: Library
           key: Library-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
 
-      # ✅ ЗАМЕНА: Используем официальный экшен вместо ручного вызова CLI
       - name: Run Unity Tests (Playmode)
         uses: game-ci/unity-test-runner@v4
         env:
@@ -50,19 +56,31 @@ jobs:
         with:
           unityVersion: ${{ env.UNITY_VERSION }}
           testMode: playmode
-          # ⚠️ ВАЖНО: Для Unity 6000.6.x+ размер shared memory должен быть >= 1025m, иначе тесты падают [[22]]
-          dockerShmSize: 1025m 
-          customParameters: -testSettingsFile Packages/com.unity.test-framework/Settings/DefaultTestSettings.asset
+          dockerShmSize: 1025m
+          artifactsPath: artifacts
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
 
-      # Если нужны также editmode тесты, просто продублируйте шаг выше, изменив testMode: editmode
+      - name: Fix Artifacts Permissions
+        if: always()
+        run: |
+          if [ -d "artifacts" ]; then
+            sudo chown -R $(whoami):$(id -g) artifacts/ || true
+          else
+            mkdir -p artifacts
+          fi
 
-      - name: Upload test artifacts
+      - name: Upload Test Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
           path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
 
+  # ============================================================
+  # ЗАДАЧА 3: Компиляция игры в облаке (WebGL)
+  # ============================================================
   build_game:
     needs: run_tests
     runs-on: ubuntu-latest
@@ -74,20 +92,20 @@ jobs:
         with:
           lfs: true
 
-      - name: Free disk space
+      - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
           docker image prune -af || true
           df -h
 
-      - uses: actions/cache@v4
+      - name: Cache Library
+        uses: actions/cache@v4
         with:
           path: Library
           key: Library-${{ runner.os }}-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/packages-lock.json', 'Assets/**/*.asmdef') }}
           restore-keys: |
             Library-Build-${{ runner.os }}-${{ env.UNITY_VERSION }}-v2-
 
-      # ✅ ЗАМЕНА: Используем официальный экшен для сборки
       - name: Build WebGL Player
         uses: game-ci/unity-builder@v4
         env:
@@ -106,7 +124,11 @@ jobs:
         with:
           name: WebGL-Build
           path: Builds/WebGL
+          retention-days: 7
 
+  # ============================================================
+  # ЗАДАЧА 4: Автоматическое зеркалирование в резервный репозиторий
+  # ============================================================
   mirror_repo:
     needs: run_tests
     if: github.repository == 'shiReverie/arpo2'
@@ -123,10 +145,10 @@ jobs:
           BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}
         run: |
           if [ -z "$BACKUP_TOKEN" ]; then
-            echo "=== ОШИБКА: BACKUP_TOKEN is empty! Create a PAT with scopes [repo, workflow] ==="
+            echo "=== ❌ ОШИБКА: BACKUP_TOKEN is empty! ==="
             exit 1
           else
-            echo "=== BACKUP_TOKEN is set (length: ${#BACKUP_TOKEN}) ==="
+            echo "=== ✅ BACKUP_TOKEN is set (length: ${#BACKUP_TOKEN}) ==="
           fi
 
       - name: Push to Backup Repository
@@ -135,8 +157,11 @@ jobs:
         run: |
           echo "=== Начало процесса зеркалирования ==="
           git push --force https://x-access-token:${BACKUP_TOKEN}@github.com/shiReverie/arpo2_backup.git master
-          echo "=== Код успешно продублирован ==="
+          echo "=== ✅ Код успешно продублирован ==="
 
+  # ============================================================
+  # ЗАДАЧА 5: Сборка Docker-образа с игрой
+  # ============================================================
   build_docker_image:
     needs: build_game
     runs-on: ubuntu-latest
@@ -170,6 +195,9 @@ jobs:
             ghcr.io/shireverie/platformer-game:latest
             ghcr.io/shireverie/platformer-game:${{ github.sha }}
 
+  # ============================================================
+  # ЗАДАЧА 6: Автоматический деплой игры на GitHub Pages
+  # ============================================================
   deploy_to_pages:
     needs: build_game
     runs-on: ubuntu-latest
@@ -190,3 +218,57 @@ jobs:
         with:
           folder: Builds/WebGL
           branch: gh-pages
+          clean: true
+
+  # ============================================================
+  # ЗАДАЧА 7 (ЛР №6): Telegram-оповещения о результатах пайплайна
+  # ============================================================
+  notify:
+    needs: [sanity_check, run_tests, build_game, mirror_repo, build_docker_image, deploy_to_pages]
+    if: always()  # ✅ Задача выполняется при любом исходе остальных
+    runs-on: ubuntu-latest
+    steps:
+      # Определяем, на каком этапе упал пайплайн
+      - name: Determine pipeline status
+        id: status
+        run: |
+          if [ "${{ needs.sanity_check.result }}" != "success" ]; then
+            echo "stage=sanity_check" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.run_tests.result }}" != "success" ]; then
+            echo "stage=run_tests" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.build_game.result }}" != "success" ]; then
+            echo "stage=build_game" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.mirror_repo.result }}" != "success" ]; then
+            echo "stage=mirror_repo" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.build_docker_image.result }}" != "success" ]; then
+            echo "stage=build_docker_image" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.deploy_to_pages.result }}" != "success" ]; then
+            echo "stage=deploy_to_pages" >> $GITHUB_OUTPUT
+          else
+            echo "stage=none" >> $GITHUB_OUTPUT
+          fi
+
+      # Отправляем сообщение в Telegram через Bot API
+      - name: Send Telegram notification
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STAGE: ${{ steps.status.outputs.stage }}
+          SITE_URL: "https://shireverie.github.io/arpo2/"
+          RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          AUTHOR: ${{ github.event.head_commit.author.name }}
+        run: |
+          if [ "$STAGE" = "none" ]; then
+            TEXT="✅ Сборка arpo2 завершена успешно.
+          Автор коммита: ${AUTHOR}
+          Игра доступна: ${SITE_URL}
+          Прогон: ${RUN_URL}"
+          else
+            TEXT="❌ Сборка arpo2 упала на задаче ${STAGE}.
+          Автор коммита: ${AUTHOR}
+          Лог прогона: ${RUN_URL}"
+          fi
+
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{\"chat_id\":\"${CHAT_ID}\",\"text\":\"${TEXT}\"}"
